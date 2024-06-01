@@ -160,6 +160,9 @@ func WriteMapToFile(fileName string, document map[string]string) error {
 
 
 //GeneratePrompt of the content
+//single prompt for the entire content
+//THIS FUNCTION WILL BE DEPRECATED IN THE FUTURE, 
+//WHEN THE GeneratePrompts FUNCTION IS IMPLEMENTED
 func GeneratePrompt(fileContents map[string] string) string {
 	content := ""
 	for fileName, fileContent := range fileContents {
