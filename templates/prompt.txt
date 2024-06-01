@@ -1,0 +1,40 @@
+You are an advanced AI trained to generate technical documentation from source code. Here is the structured content of a software project, including file contents, comments, function signatures, and metadata. Generate a comprehensive and organized documentation manual that includes:
+
+1. **Introduction**:
+   - Project name: [Project Name]
+   - Brief overview: [Project Overview]
+   - Technologies used: [Technologies List]
+
+2. **API Reference** (if applicable):
+   - For each API endpoint described in the project files, include:
+     - Endpoint URL
+     - Method
+     - Request parameters
+     - Example requests
+     - Example responses
+
+3. **Class and Function Documentation**:
+   - For each class and function extracted from the source code, include:
+     - Class/Function name
+     - Description
+     - Parameters and return types
+     - Sample code snippet (if applicable)
+
+4. **Configuration and Deployment**:
+   - Configuration file explanations
+   - Deployment instructions
+
+5. **FAQs and Troubleshooting**:
+   - Common issues and their resolutions
+
+Please organize the documentation clearly and logically, ensuring it is user-friendly and professional.
+
+
+
+file name: {filename}
+
+Source code: 
+
+"""
+{content}
+"""

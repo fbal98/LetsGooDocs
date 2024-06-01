@@ -1,0 +1,171 @@
+You are an advanced AI trained to generate technical documentation from source code. 
+Here is the structured content of a software project, including file contents, comments,
+function signatures, and metadata. Generate a comprehensive and organized documentation manual that includes:
+
+Please provide a detailed explanation of the above content, focusing on the following aspects:
+1. Description of functionality and purpose.
+2. Usage examples and code snippets where applicable.
+3. Parameters and returns description with types and possible values.
+4. Any potential errors and their handling.
+
+
+file name: /Users/bubader/Documents/GitHub/vedi-dbq-automation/modules/api/src/routes/authRoute.ts
+import { Router, Request, Response } from "express";
+import User from "../db/models/User";
+import ResetToken from "../db/models/ResetPasswordToken";
+import jwt from "jsonwebtoken";
+import { JwtConfig } from "../config";
+import { v4 as uuidv4 } from "uuid";
+import { sendForgotPwdEmail } from "../utils/generateChangePwdFeRoute";
+import { validateForgotPassword } from "../middleware/validation/validateForgotPassword";
+import bcrypt from "bcrypt";
+const router = Router();
+
+router.post("/login", async (req: Request, res: Response) => {
+  const { email, password } = req.body;
+
+  if (!email || !password) {
+    return res.status(400).json({
+      message: "Email and password are required",
+    });
+  }
+
+  const user = await User.findOne({ email }, null, { lean: true });
+
+  // In case of a wrong Creds
+  const isPasswordCorrect = await bcrypt.compare(
+    password,
+    user?.password || ""
+  );
+
+  if (!user || !isPasswordCorrect)
+    return res.status(401).json({
+      success: false,
+      message: "Wrong credentials",
+      data: {},
+    });
+
+  const { password: pwd, ...returnUser } = user;
+  const accessToken = jwt.sign(returnUser, process.env.AUTH_SECRET!, {
+    expiresIn: JwtConfig.accessTokenExpiresIn * 1000,
+  });
+
+  return res.status(200).json({
+    success: true,
+    message: "Logged in successfully",
+    data: {
+      user: returnUser,
+      accessToken,
+    },
+  });
+});
+
+// Endpoint to generate unique URL for resetting password
+router.post(
+  "/forgot-password",
+  validateForgotPassword,
+  async (req: Request, res: Response) => {
+    const { email, redirection_url } = req.body;
+
+    try {
+      const user = await User.findOne({ email });
+
+      if (!user) {
+        return res.status(404).json({
+          success: false,
+          message: "User not found",
+          data: {},
+        });
+      }
+
+      const resetToken = uuidv4();
+      const expires = new Date(Date.now() + 3600000); // 1 hour
+
+      // Save reset token in ResetToken collection
+      await ResetToken.create({ userId: user._id, token: resetToken, expires });
+
+      // Generate the Redirection Route and send email
+      await sendForgotPwdEmail(
+        user.firstName,
+        user.email,
+        resetToken,
+        redirection_url
+      );
+
+      res.status(200).json({
+        success: true,
+        message: "Password reset link sent successfully",
+        data: {},
+      });
+    } catch (error) {
+      console.error("Error generating reset password link:", error);
+      res.status(500).json({
+        success: false,
+        message: "Internal server error",
+        data: {},
+      });
+    }
+  }
+);
+
+// Endpoint to update password using the unique URL
+router.post("/reset-password", async (req: Request, res: Response) => {
+  const { resetToken, newPassword } = req.body;
+
+  try {
+    // Find the reset token
+    const resetTokenDoc = await ResetToken.findOne({
+      token: resetToken,
+      expires: { $gt: Date.now() },
+    });
+
+    if (!resetTokenDoc) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid or expired reset token",
+        data: {},
+      });
+    }
+
+    // Find the user by userId in resetTokenDoc
+    const user = await User.findById(resetTokenDoc.userId);
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+        data: {},
+      });
+    }
+
+    // Hash the new password
+    const hashedPassword = newPassword; //await bcrypt.hash(newPassword, 10);
+
+    // Update user's password
+    user.password = hashedPassword;
+    await user.save();
+
+    // Delete the reset token from ResetToken collection
+    await ResetToken.deleteOne({ _id: resetTokenDoc._id });
+
+    res.status(200).json({
+      success: true,
+      message: "Password updated successfully",
+      data: {},
+    });
+  } catch (error) {
+    console.error("Error updating password:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      data: {},
+    });
+  }
+});
+
+export { router as authRouter };
+
+
+The code is separated in chunks, starting from chunk #1, if the chunk number is greater than 1 it means you will 
+be provided some words that are overlapping from the previous chunk. make sure you make as much sense as possible.
+-----------------

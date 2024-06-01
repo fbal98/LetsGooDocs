@@ -1,0 +1,1667 @@
+/Users/bubader/Documents/GitHub/vedi-dbq-automation/modules/api/src/routes/score_cal.ts
+export const rules = {
+  "groups": {
+    "30": 3,
+    "50": 4,
+    "70": 4,
+    "100": 3  
+  },
+  "rules": [   
+    {
+      "rule_id": "426R",
+      "group": 30
+    },
+    {
+      "rule_id": "421R",
+      "group": 30
+    },
+    {
+      "rule_id": "425R",
+      "group": 30
+    },
+    {
+      "rule_id": "424R",
+      "group": 30
+    },
+    {
+      "rule_id": "418R",
+      "group": 50
+    },
+    {
+      "rule_id": "414R",
+      "group": 70
+    },
+    {
+      "rule_id": "423R",
+      "group": 30
+    },
+    {
+      "rule_id": "422R",
+      "group": 30
+    },
+    {
+      "rule_id": "416R",
+      "group": 50
+    },
+    {
+      "rule_id": "413R",
+      "group": 100
+    },
+    {
+      "rule_id": "420R",
+      "group": 50
+    },
+    {
+      "rule_id": "419R",
+      "group": 50
+    },
+    {
+      "rule_id": "415R",
+      "group": 70
+    },
+    {
+      "rule_id": "417R",
+      "group": 50
+    },
+    {
+      "rule_id": "443R",
+      "group": 50
+    },
+    {
+      "rule_id": "442R",
+      "group": 50
+    },
+    {
+      "rule_id": "444R",
+      "group": 100
+    },
+    {
+      "rule_id": "446R",
+      "group": 50
+    },
+    {
+      "rule_id": "445R",
+      "group": 50
+    },
+    {
+      "rule_id": "448R",
+      "group": 70
+    },
+    {
+      "rule_id": "447R",
+      "group": 70
+    },
+    {
+      "rule_id": "450R",
+      "group": 70
+    },
+    {
+      "rule_id": "449R",
+      "group": 70
+    },
+    {
+      "rule_id": "452R",
+      "group": 70
+    },
+    {
+      "rule_id": "451R",
+      "group": 70
+    },
+    {
+      "rule_id": "409R",
+      "group": 100
+    },
+    {
+      "rule_id": "454R",
+      "group": 100
+    },
+    {
+      "rule_id": "453R",
+      "group": 100
+    },
+    {
+      "rule_id": "411R",
+      "group": 70
+    },
+    {
+      "rule_id": "410R",
+      "group": 100
+    },
+    {
+      "rule_id": "412R",
+      "group": 100
+    }
+  ]
+}
+/Users/bubader/Documents/GitHub/vedi-dbq-automation/modules/api/src/routes/dbqRoute.ts
+import { Router, Request, Response } from "express";
+import { validationResult } from "express-validator";
+import DBQgenResponse, {
+  DBQgenResponse as IDBQgenResponse,
+  DBQField
+} from "../db/models/DBQgenResponse";
+import { validateIntakeSubmit } from "../middleware/validation/validateIntakeSubmit";
+import Application from "../db/models/Application";
+import { ApplicationStatus, UserType } from "../types";
+import mongoose from "mongoose";
+import authenticate from "../middleware/auth.middleware";
+import { getMissingFormsAndUpdateDb } from './applicationRoute';
+import { authDocOrPostmil, authDoctor, authPostmil } from "../middleware/userRole.middleware";
+import { rules } from './score_cal';
+
+const router = Router();
+
+router.get("/", authenticate, async (req: any, res: Response) => {
+  try {
+    let queryFilters = {}; // Initialize an empty object for query filters
+
+    // Check if 'formId' is present in query params
+    if (req.query.formId) {
+      queryFilters = {
+        ...queryFilters,
+        formId: Number(req.query.formId as string),
+      }; // new mongoose.Types.ObjectId(req.query.formId as string)};
+    }
+
+    // Check if 'transactionId' is present in query params
+    if (req.query.transactionId) {
+      queryFilters = {
+        ...queryFilters,
+        transactionId: new mongoose.Types.ObjectId(
+          req.query.transactionId as string
+        ),
+      };
+    }
+
+    // Check if 'userId' is present in query params
+    if (req.query.userId) {
+      queryFilters = {
+        ...queryFilters,
+        userId: new mongoose.Types.ObjectId(req.query.userId as string),
+      };
+    }
+
+    const latestEntities = await DBQgenResponse.aggregate([
+      {
+        $match: queryFilters,
+      },
+      {
+        $sort: { transactionId: 1, formId: 1, version: -1 }, // Sort by transactionId, formId, and version in descending order
+      },
+      {
+        $group: {
+          _id: { transactionId: "$transactionId", formId: "$formId" },
+          latestVersion: { $first: "$$ROOT" }, // Select the first document in each group (latest version)
+        },
+      },
+      {
+        $replaceRoot: { newRoot: "$latestVersion" }, // Replace the root document with the latest version
+      },
+      {
+        $lookup: {
+          from: "users", // Replace "users" with the actual name of your User collection
+          localField: "userId",
+          foreignField: "_id",
+          as: "user",
+        },
+      },
+      {
+        $unwind: "$user",
+      },
+      {
+        $lookup: {
+          from: "users",
+          localField: "user.vediId",
+          foreignField: "_id",
+          as: "vedi",
+          pipeline: [
+            {
+              $project: {
+                password: 0,
+              }
+            },
+          ],
+        },
+      },
+      {
+        $lookup: {
+          from: "users",
+          localField: "user.doctorId",
+          foreignField: "_id",
+          as: "doctor",
+          pipeline: [
+            {
+              $project: {
+                password: 0,
+              }
+            },
+          ],
+        },
+      },
+      {
+        $project: {
+          "user.password": 0,
+          "user.formIds": 0,
+          "user.vediId": 0,
+          "user.doctorId": 0
+        }
+      }
+    ]);
+
+    // Highlight the changed fields
+    const { user } = req;
+    if (user.role == UserType.POSTMIL && req.query.transactionId) {
+      const application = await Application.findOne({transactionId: req.query.transactionId});
+
+      if (application && application.status.id == ApplicationStatus.ChangeRequired.id) {
+        if (latestEntities.length == 1) {
+          const lastVersion = latestEntities[0];
+          const prevVersion = await DBQgenResponse.findOne({transactionId: lastVersion.transactionId, userId: lastVersion.userId, version: lastVersion.version - 1});
+          if (prevVersion) {
+            const highlightedChanges = highlightChangedFields(lastVersion, prevVersion);
+            latestEntities[0] = highlightedChanges;
+          }
+        }
+      }
+    }
+    
+
+    return res.send({
+      success: true,
+      message: "Data retrieved",
+      data: latestEntities,
+    });
+  } catch (error: any) {
+    console.error("Error in DBQ:", error);
+    return res.status(500).json({
+      message: "Something went wrong: DBQ",
+      error: error.message,
+    });
+  }
+});
+
+// Doctor endpoint: Request Change
+// VeDi Endpoint: Make a change Before submitting it to the Doctor
+// Issue: #128
+router.post(
+  "/:dbqId/request-change",
+  authenticate,
+  authDocOrPostmil,
+  async (req: any, res: Response) => {
+    try {
+      const { dbqId } = req.params;
+      const role = req.user.role;
+      const lastDBQVersion = await DBQgenResponse.findOne(
+        { _id: new mongoose.Types.ObjectId(dbqId) },
+        null,
+        { lean: true }
+      );
+      // Check that DBQ exist
+      if (lastDBQVersion == null) {
+        return res.status(404).json({
+          success: false,
+          message: "DBQ Not found",
+        });
+      }
+
+      const transactionId = lastDBQVersion.transactionId;
+      const formId = lastDBQVersion.formId;
+      // Retrieve the application of the DBQ
+      const application = await Application.findOne({
+        formId: Number(formId),
+        transactionId: transactionId,
+      });
+      if (application == null) {
+        return res.status(404).json({
+          success: false,
+          message: "No Application could be found for the DBQ",
+        });
+      }
+
+      // We can request a change only on a 'SUBMITTED', or a 'CHANGE_REJECTED' application
+      if (
+        application.status.id != ApplicationStatus.InReview.id &&
+        application.status.id != ApplicationStatus.ChangeRejected.id &&
+        application.status.id != ApplicationStatus.SubmittedToDoctor.id
+      ) {
+        return res.status(403).json({
+          success: false,
+          message:
+            "The current status of the Application does not allow this operation",
+        });
+      }
+
+      const { _id, version, ...otherFields } = lastDBQVersion;
+      const { doctorNote, fields } = req.body;
+
+      const dbData: IDBQgenResponse = new DBQgenResponse({
+        ...otherFields,
+        fields,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        version: version ? version + 1 : 1,
+        doctorNote,
+      });
+
+      let newStatus = ApplicationStatus.InReview;
+      // dbData.userId = req.user.id
+      if (
+        (application.status.id == ApplicationStatus.ChangeRejected.id ||
+          application.status.id == ApplicationStatus.SubmittedToDoctor.id) &&
+        role === UserType.DOCTOR
+      ) {
+        newStatus = ApplicationStatus.ChangeRequired;
+      }
+
+      application.status = newStatus;
+
+      // Save the new version of the DBQ and Update the application Status
+      await Promise.all([dbData.save(), application.save()]);
+
+      return res.status(200).json({
+        success: true,
+        message: "Change request submitted",
+      });
+    } catch (error: any) {
+      console.error("Error in DBQ Route:", error);
+      return res.status(500).json({
+        success: false,
+        message: "Something went wrong: DBQRoute",
+        error: error.message,
+      });
+    }
+  }
+);
+
+// VeDi Team endpoint: Approve requested change
+// Issue: #129
+router.post(
+  "/:dbqId/approve",
+  authenticate,
+  authPostmil,
+  async (req: Request, res: Response) => {
+    try {
+      const { dbqId } = req.params;
+      const lastDBQVersion = await DBQgenResponse.findOne({
+        _id: new mongoose.Types.ObjectId(dbqId),
+      });
+      // Check that DBQ exist
+      if (lastDBQVersion == null) {
+        return res.status(404).json({
+          success: false,
+          message: "DBQ Not found",
+        });
+      }
+
+      const transactionId = lastDBQVersion.transactionId;
+      const formId = lastDBQVersion.formId;
+      // Retrieve the application of the DBQ
+      const application = await Application.findOne({
+        formId: Number(formId),
+        transactionId: transactionId,
+      });
+      if (application == null) {
+        return res.status(404).json({
+          success: false,
+          message: "No Application could be found for the DBQ",
+        });
+      }
+      // We can approve only a "Change required" or a "Doctor Approved" application
+      if (
+        application.status.id !== ApplicationStatus.ChangeRequired.id &&
+        application.status.id !== ApplicationStatus.ApprovedByDoctor.id
+      ) {
+        return res.status(403).json({
+          success: false,
+          message:
+            "The current status of the Application does not allow this operation",
+        });
+      }
+      // Update the application status
+      application.status = ApplicationStatus.SubmittedToDoctor;
+      await application.save();
+
+      return res.status(200).json({
+        success: true,
+        message: "DBQ Approved",
+      });
+    } catch (error: any) {
+      console.log("Error in DBQ Route:", error);
+      return res.status(500).json({
+        success: false,
+        message: "Something went wrong: DBQRoute",
+        error: error.message,
+      });
+    }
+  }
+);
+
+// VeDi Team endpoint: Send back DBQ to doctor
+// Issue: #129
+router.post(
+  "/:dbqId/reject",
+  authenticate,
+  authPostmil,
+  async (req: Request, res: Response) => {
+    try {
+      const { dbqId } = req.params;
+      const lastDBQVersion = await DBQgenResponse.findOne({
+        _id: new mongoose.Types.ObjectId(dbqId),
+      });
+      // Check that DBQ exist
+      if (lastDBQVersion == null) {
+        return res.status(404).json({
+          success: false,
+          message: "DBQ Not found",
+        });
+      }
+
+      const transactionId = lastDBQVersion.transactionId;
+      const formId = lastDBQVersion.formId;
+      // Retrieve the application of the DBQ
+      const application = await Application.findOne({
+        formId: Number(formId),
+        transactionId: transactionId,
+      });
+      if (application == null) {
+        return res.status(404).json({
+          success: false,
+          message: "No Application could be found for the DBQ",
+        });
+      }
+      // We can send back only a "Change request" DBQ to Doctor
+      if (application.status.id !== ApplicationStatus.ChangeRequired.id) {
+        return res.status(403).json({
+          success: false,
+          message:
+            "The current status of the Application does not allow this operation",
+        });
+      }
+      // Update the application status
+      application.status = ApplicationStatus.ChangeRejected;
+      await application.save();
+
+      return res.status(200).json({
+        success: true,
+        message: "DBQ Change Rejected",
+      });
+    } catch (error: any) {
+      console.log("Error in DBQ Route:", error);
+      return res.status(500).json({
+        success: false,
+        message: "Something went wrong: DBQRoute",
+        error: error.message,
+      });
+    }
+  }
+);
+
+// Doctor endpoint: Approve
+// Issue: #130
+router.post(
+  "/:dbqId/doctor-approve",
+  authenticate,
+  authDoctor,
+  async (req: Request, res: Response) => {
+    try {
+      const { dbqId } = req.params;
+      const lastDBQVersion = await DBQgenResponse.findOne({
+        _id: new mongoose.Types.ObjectId(dbqId),
+      });
+      // Check that DBQ exist
+      if (lastDBQVersion == null) {
+        return res.status(404).json({
+          success: false,
+          message: "DBQ Not found",
+        });
+      }
+
+      const transactionId = lastDBQVersion.transactionId;
+      const formId = lastDBQVersion.formId;
+      // Retrieve the application of the DBQ
+      const application = await Application.findOne({
+        formId: Number(formId),
+        transactionId: transactionId,
+      });
+      if (application == null) {
+        return res.status(404).json({
+          success: false,
+          message: "No Application could be found for the DBQ",
+        });
+      }
+      // We can approve a VeDi Doctor Review or Change Rejected DBQ
+      if (
+        application.status.id !== ApplicationStatus.SubmittedToDoctor.id &&
+        application.status.id !== ApplicationStatus.ChangeRejected.id
+      ) {
+        return res.status(403).json({
+          success: false,
+          message:
+            "The current status of the Application does not allow this operation",
+        });
+      }
+      // Update the application status
+      application.status = ApplicationStatus.ApprovedByDoctor;
+      await application.save();
+
+      return res.status(200).json({
+        success: true,
+        message: "DBQ Change Approved",
+      });
+    } catch (error: any) {
+      console.log("Error in DBQ Route:", error);
+      return res.status(500).json({
+        success: false,
+        message: "Something went wrong: DBQRoute",
+        error: error.message,
+      });
+    }
+  }
+);
+
+//Vedi Team endpoint: Submit DBQ
+router.post(
+  "/:dbqId/submit",
+  authenticate,
+  authPostmil,
+  async (req: Request, res: Response) => {
+    try {
+      const { dbqId } = req.params;
+      const lastDBQVersion = await DBQgenResponse.findOne({
+        _id: new mongoose.Types.ObjectId(dbqId),
+      });
+      // Check that DBQ exist
+      if (lastDBQVersion == null) {
+        return res.status(404).json({
+          success: false,
+          message: "DBQ Not found",
+        });
+      }
+
+      const transactionId = lastDBQVersion.transactionId;
+      const formId = lastDBQVersion.formId;
+      // Retrieve the application of the DBQ
+      const application = await Application.findOne({
+        formId: Number(formId),
+        transactionId: transactionId,
+      });
+      if (application == null) {
+        return res.status(404).json({
+          success: false,
+          message: "No Application could be found for the DBQ",
+        });
+      }
+      // We can submit only a "Approved by Doctor" DBQ
+      if (application.status.id !== ApplicationStatus.InReview.id) {
+        return res.status(403).json({
+          success: false,
+          message:
+            "The current status of the Application does not allow this operation",
+        });
+      }
+      // Update the application status
+      
+      const missingForms = await getMissingFormsAndUpdateDb(application.userId, formId, ApplicationStatus.SubmittedToDoctor.id);
+      if (missingForms.length == 0) {
+        application.status = ApplicationStatus.SubmittedToDoctor
+        await application.save();
+
+        return res.status(200).json({
+          success: true,
+          message: "DBQ Submitted",
+          data: {
+            submitted: true
+          }
+        });
+      }
+      else {
+        application.status = ApplicationStatus.AwaitingSubmission
+        await application.save();
+        
+        return res.status(200).json({
+          success: true,
+          message: "DBQ Submitted",
+          data: {
+            submitted: false,
+            formIds: missingForms
+          }
+        });
+      }
+
+     
+    } catch (error: any) {
+      console.log("Error in DBQ Route:", error);
+      return res.status(500).json({
+        success: false,
+        message: "Something went wrong: DBQRoute",
+        error: error.message,
+      });
+    }
+  }
+);
+
+
+// VeDi Team last approve
+router.post(
+  "/:dbqId/last-approve",
+  authenticate,
+  authPostmil,
+  async (req: any, res: Response) => {
+    try {
+      const { dbqId } = req.params;
+      const lastDBQVersion = await DBQgenResponse.findOne({
+        _id: new mongoose.Types.ObjectId(dbqId),
+      });
+      // Check that DBQ exist
+      if (lastDBQVersion == null) {
+        return res.status(404).json({
+          success: false,
+          message: "DBQ Not found",
+        });
+      }
+
+      const transactionId = lastDBQVersion.transactionId;
+      const formId = lastDBQVersion.formId;
+      // Retrieve the application of the DBQ
+      const application = await Application.findOne({
+        formId: Number(formId),
+        transactionId: transactionId,
+      });
+      if (application == null) {
+        return res.status(404).json({
+          success: false,
+          message: "No Application could be found for the DBQ",
+        });
+      }
+      // We can submit only a "Approved by Doctor" DBQ
+      if (application.status.id !== ApplicationStatus.ApprovedByDoctor.id) {
+        return res.status(403).json({
+          success: false,
+          message:
+            "The current status of the Application does not allow this operation",
+        });
+      }
+      application.status = ApplicationStatus.Approved; 
+      await application.save();
+      
+      return res.status(200).json({
+        success: true,
+        message: "Application approved",
+      });
+
+    } catch (error: any) {
+      console.log("Error in DBQ Route:", error);
+      return res.status(500).json({
+        success: false,
+        message: "Something went wrong: DBQRoute",
+        error: error.message,
+      });
+    }
+});
+
+
+router.post("/score", 
+// authenticate, 
+(req: any, res: Response) => {
+  const fields : DBQField[] = req.body;
+  
+  const checkedFields = fields.filter(field => field.value == true);
+  const join = joinArrays(checkedFields, rules.rules);
+
+  const _100_score = join.filter(field => field.group == 100).length;
+  const _70_score = join.filter(field => field.group == 70).length;
+  const _50_score = join.filter(field => field.group == 50).length;
+  const _30_score = join.filter(field => field.group == 30).length;
+
+  let score = 0;
+  if (_100_score >= rules.groups[100]) {
+    score = 100;
+  } else if (_70_score >= rules.groups[70]) {
+    score = 70;
+  } else if (_50_score >= rules.groups[50]) {
+    score = 50;
+  } else if (_30_score >= rules.groups[30]) {
+    score = 30;
+  }
+
+  res.status(200).json({
+    success: true,
+    message: "score retrieved",
+    data: {
+      score
+    }
+  });
+});
+
+
+
+router.post("/:dbqId/sign",
+            authenticate,
+            authDoctor, 
+async (req: any, res: Response) => {
+  try {
+
+    const { dbqId } = req.params;
+    const lastDBQVersion = await DBQgenResponse.findById(dbqId);
+    // Check that DBQ exist
+    if (lastDBQVersion == null) {
+      return res.status(404).json({
+        success: false,
+        message: "DBQ Not found",
+      });
+    }
+
+    const transactionId = lastDBQVersion.transactionId;
+    const formId = lastDBQVersion.formId;
+    // Retrieve the application of the DBQ
+    const application = await Application.findOne({
+      formId: Number(formId),
+      transactionId: transactionId,
+    });
+
+
+    if (!application) {
+      return res.status(404).json({ message: "Application not found for the authenticated user" }); 
+    }
+
+    if (application.status.id != ApplicationStatus.ApprovedByDoctor.id) {
+      return res.status(403).json({ message: "The current status of the application does not allow this operation" }); 
+    }
+    const { signature } = req.body;
+
+    lastDBQVersion.signature = signature;
+
+    await lastDBQVersion.save();
+
+    return res.status(200).json({
+        success: true,
+        message: "Signature saved",
+    });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+
+
+// Function to join the arrays based on rule_id
+function joinArrays(rules: DBQField[], matching: any[]) {
+  return rules.map(desc => {
+      const matchingInfo = matching.find(match => match.rule_id === desc.id);
+      if (matchingInfo) {
+          return { ...desc, ...matchingInfo };
+      } else {
+          return desc;
+      }
+  });
+}
+
+function highlightChangedFields(newVersion: any, oldVersion: any) {
+  const newFields = newVersion.fields.map((newField: any) => {
+    const oldField = oldVersion.fields.find((f: any) => f.id === newField.id);
+    if (oldField && oldField.value !== newField.value) {
+      return { ...newField, oldValue: oldField.value };
+    }
+    return newField;
+  });
+
+  return { ...newVersion, fields: newFields };
+}
+
+export { router as dbqRouter };
+
+/Users/bubader/Documents/GitHub/vedi-dbq-automation/modules/api/src/routes/medicalCenterRoute.ts
+import { Router } from "express";
+import MedicalCenter from "../db/models/MedicalCenters";
+
+const router = Router();
+
+router.post("/", async (req, res) => {
+  const { name, address, phone, hours, mapLink } = req.body;
+
+  try {
+    const medicalCenter = await MedicalCenter.create({
+      name,
+      address,
+      phone,
+      hours,
+      mapLink,
+    });
+
+    return res.status(200).json({
+      message: "Medical center created successfully",
+      data: medicalCenter,
+    });
+  } catch (e) {
+    console.log(e);
+    return res.status(500).json({
+      message: "Internal server error",
+    });
+  }
+});
+
+
+//get all medical centers + filter by state
+router.get("/", async (req, res) => {
+    const { state } = req.query;
+
+    let query = {};
+    if (state) {
+      query = { "address.state": state };
+    }
+
+    try {
+      const medicalCenters = await MedicalCenter.find(query);
+      return res.status(200).json({
+        message: "Medical centers fetched successfully",
+        data: medicalCenters,
+      });
+    } catch (e) {
+      console.log(e);
+      return res.status(500).json({
+        message: "Internal server error",
+      });
+    }
+});
+
+export { router as medicalCenterRouter};
+
+/Users/bubader/Documents/GitHub/vedi-dbq-automation/modules/api/src/routes/applicationRoute.ts
+import { Router, Request, Response } from "express";
+import { validateMongoId } from "../middleware/validation/validateMonoId";
+import Application from "../db/models/Application";
+import { UserIntakeResponse } from "../db/models/UserIntakeResponse";
+import mongoose from 'mongoose';
+import authenticate from '../middleware/auth.middleware';
+import { ApplicationStatus, NextRecommendedActionResponse, UserType, recommendedText } from '../types';
+import IntakeForm from '../db/models/IntakeForm';
+import User from '../db/models/User';
+import { authDocOrPostmil, authDoctor, authPostmil, authVeteran } from '../middleware/userRole.middleware';
+
+const router = Router();
+
+//edit applications status given the application id
+router.put("/:id", validateMongoId, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { status } = req.body;
+
+  try {
+    const application = await Application.findByIdAndUpdate(
+      id,
+      { status },
+      { new: true }
+    );
+    if (!application) {
+      return res.status(404).json({ message: "Application not found" });
+    }
+    return res.status(200).json({
+      success: true,
+      message: "Application updated",
+      data: application,
+    });
+  } catch (error: any) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+//Todo: remove /user from the path and use the user id from the token
+//after the authentication middleware is integrated
+router.get(
+  "/user/:id",
+  authenticate,
+  validateMongoId,
+  async (req: any, res: Response) => {
+    const { id } = req.params;
+    const user = req.user; 
+    const {_id: userId, role} = user;
+
+    try {
+      let applications: any = [];
+      // Retrieve only the vetren applications
+      if (role == UserType.VETERAN) {
+        applications = await Application.find({ userId: new mongoose.Types.ObjectId(id) }, undefined, {sort: {updatedAt: -1}});
+        // Get the user's pending forms
+        const applicationFormIds = applications.map((appli: any) => appli.formId);
+        const pendingForms = await IntakeForm.find({formId: {$nin: applicationFormIds, $in: user.formIds}});
+        // append the Pending forms to the application list
+        pendingForms.map(form => {
+          applications.push({
+            formId: form.formId, 
+            status: ApplicationStatus.Pending,
+            userId: userId
+          });  
+        })
+
+      } else if (role == UserType.DOCTOR) {
+        const assignedVetUsers = await User.find({doctorId: userId, role: UserType.VETERAN});
+        const assignedVetUserIds = assignedVetUsers.map(user => user._id);
+        applications = await Application.find(
+          {
+            "status.id": {
+              $in: [
+                ApplicationStatus.SubmittedToDoctor.id,
+                ApplicationStatus.ChangeRejected.id,
+                ApplicationStatus.ChangeRequired.id,
+                ApplicationStatus.RejectedByDoctor.id,
+                ApplicationStatus.ApprovedByDoctor.id,
+              ],
+            },
+            userId: { $in: assignedVetUserIds },
+          },
+          undefined,
+          {
+            sort: { updatedAt: -1 },
+          }
+        ).populate("userId", "firstName lastName SSN");
+      } else if (role == UserType.POSTMIL) {
+        const assignedVetUsers = await User.find({vediId: userId, role: UserType.VETERAN});
+        const assignedVetUserIds = assignedVetUsers.map(user => user._id);
+        applications = await Application.find(
+          { userId: { $in: assignedVetUserIds } },
+          undefined,
+          { sort: { updatedAt: -1 } }
+        ).populate("userId", "firstName lastName SSN");
+      }
+      return res.status(200).json({
+        success: true,
+        message: "Applications retrieved",
+        data: applications,
+      });
+    } catch (error: any) {
+      return res.status(500).json({
+        success: false,
+        message: error.message,
+      });
+    }
+  }
+);
+
+//get user progress using application id
+router.get(
+  "/:id/progress",
+  authenticate,
+  validateMongoId,
+  async (req: any, res: Response) => {
+    const { id: appId } = req.params;
+    const {_id:userId} = req.user as any;
+
+    try {
+      //get application by id
+      const applications = await Application.find({
+        userId: new mongoose.Types.ObjectId(userId),
+        _id: new mongoose.Types.ObjectId(appId),
+        "status.id": ApplicationStatus.InProgres.id,
+      });
+
+      if (!applications) {
+        return res.status(404).json({ message: "Application not found for the authenticated user" });
+      }
+
+      
+      const userIntakeResponses = await UserIntakeResponse.aggregate([
+        {
+            $match: {
+                _id: { $in: applications.map(app => app.transactionId) }
+            }
+        },
+        {
+            $lookup: {
+                from: 'intakeforms', 
+                localField: 'formId',
+                foreignField: 'formId',
+                as: 'intakeForms'
+                
+
+            }
+        },
+        {
+            $addFields: {
+                formName: { $arrayElemAt: ['$intakeForms.DBQType', 0] }
+            }
+        },
+        {
+            $project: {
+                _id: 1,
+                formId: 1,
+                formName: 1,
+                responses: 1,
+                fields: 1,
+
+            }
+        }
+        
+    ]);
+    
+    
+
+      return res.status(200).json({
+        success: true,
+        message: "User progress retrieved",
+        data: userIntakeResponses[0],
+      });
+    } catch (error: any) {
+      return res.status(500).json({ success: false, message: error.message });
+    }
+  }
+);
+
+//get user responses using application id - postmil user only
+router.get(
+  "/:id/responses",
+  authenticate,
+  authPostmil,
+  validateMongoId,
+  async (req: any, res: Response) => {
+    const { id: appId } = req.params;
+
+    try {
+      //get application by id
+      const applications = await Application.find({
+        _id: new mongoose.Types.ObjectId(appId),
+      });
+
+      if (!applications) {
+        return res.status(404).json({ message: "Application not found for the authenticated user" });
+      }
+
+      
+      const userIntakeResponses = await UserIntakeResponse.aggregate([
+        {
+            $match: {
+                _id: { $in: applications.map(app => app.transactionId) }
+            }
+        },
+        {
+            $lookup: {
+                from: 'intakeforms', 
+                localField: 'formId',
+                foreignField: 'formId',
+                as: 'intakeForms'
+                
+
+            }
+        },
+        {
+            $addFields: {
+                formName: { $arrayElemAt: ['$intakeForms.DBQType', 0] }
+            }
+        },
+        {
+            $project: {
+                _id: 1,
+                formId: 1,
+                formName: 1,
+                responses: 1,
+                fields: 1,
+
+            }
+        }
+        
+    ]);
+    
+    
+
+      return res.status(200).json({
+        success: true,
+        message: "User progress retrieved",
+        data: userIntakeResponses[0],
+      });
+    } catch (error: any) {
+      return res.status(500).json({ success: false, message: error.message });
+    }
+  }
+);
+
+// get next recommended action
+router.get(
+  "/next-action",
+  authenticate,
+  authVeteran,
+  async (req: any, res: Response) => {
+    const { user } = req;
+    try {
+      const applications = await Application.find({userId: user._id});
+      let data: NextRecommendedActionResponse | null = null;
+      
+      if (applications.length == 0) {
+        data = {
+          type: "form",
+          formIds: user.formIds,
+          applicationIds: [],
+          actionText: recommendedText[1].text,
+        };
+      } else {
+        const inProgresApps = applications.filter(app => app.status.id == ApplicationStatus.InProgres.id);
+        if (inProgresApps.length > 0) {
+          data = {
+            type: "application",
+            formIds: inProgresApps.map(app => app.formId),
+            applicationIds: inProgresApps.map(app => app._id.toString()),
+            actionText: recommendedText[2].text,
+          };
+        } else {
+          const doctorApprovedApps = applications.filter(app => app.status.id == ApplicationStatus.ApprovedByDoctor.id);
+          if ( doctorApprovedApps.length > 0) {
+            data = {
+              type: "dbq",
+              formIds: doctorApprovedApps.map(app => app.formId),
+              applicationIds: doctorApprovedApps.map(app => app._id.toString()),
+              actionText: recommendedText[6].text,
+            };
+          } else {
+            // This will be refactored once the Intake Forms has a Type (Mental / Physical)
+            const submittedToDocApps = applications.filter(app => app.status.id == ApplicationStatus.SubmittedToDoctor.id);
+            if (submittedToDocApps.length > 0) {
+              data = {
+                type: "doctor",
+                applicationIds: submittedToDocApps.map(app => app._id.toString()),
+                actionText: recommendedText[4].text,
+              };
+            } else {
+              const awaitingSubmissionApps = applications.filter(app => app.status.id == ApplicationStatus.AwaitingSubmission.id);
+              if (awaitingSubmissionApps.length > 0) {
+                const submittedForms = await IntakeForm.find({ formId: {$in: awaitingSubmissionApps.map(app => app.formId)} });
+                const awaitingForms = await IntakeForm.find({type: {$in: submittedForms.map(form => form.type)}, formId: {$in: user.formIds, $nin: awaitingSubmissionApps.map(app => app.formId)}});
+                data = {
+                  type: "form",
+                  actionText: recommendedText[2].text,
+                  formIds: awaitingForms.map(form => form.formId)
+                }
+              } else {
+                data = {
+                  type: "none",
+                  actionText: recommendedText[3].text,
+                };
+              }
+            }
+          }
+        }
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: "",
+        data
+      });
+    } catch (error: any) {
+      return res.status(500).json({ success: false, message: error.message });
+    }
+  }
+);
+
+// allow vedi and doctors to update app state
+router.put(
+  "/:id/state",
+  authenticate,
+  authDocOrPostmil,
+  async (req: any, res: Response) => {
+    try {
+      const { id } = req.params;
+      const application = await Application.findById(id);
+      if (!application) {
+        return res.status(404).json({success: false, message: "Application not found"});
+      }
+
+      const { status: statusId } = req.body;
+      const newStatus = Object.values(ApplicationStatus).find(status => status.id.toLowerCase() == statusId.toLowerCase());
+      if (newStatus) {
+        application.status = newStatus;
+        application.save();
+        return res.status(200).json({
+          success: true,
+          message: "Application status updated"
+        })
+      } else {
+        return res.status(404).json({
+          success: false,
+          message: "Status Not found"
+        });
+      }
+    } catch (error: any) {
+      return res.status(500).json({ success: false, message: error.message });
+    }
+  }
+);
+
+
+
+export const getMissingFormsAndUpdateDb = async (userId: mongoose.Types.ObjectId, formId: number, wantedStatusId: string): Promise<number[]> => {
+
+  const [user, form] = await Promise.all([User.findById(userId), IntakeForm.findOne({formId})]);
+  
+  // this is won't be the case since it was already checked before getting at this stage
+  if (!form || !user) {
+    return [];
+  }
+
+  const formIdsSameType = await IntakeForm.find({type: form.type}, {formId: 1}).lean();
+  const userFormIds = formIdsSameType.filter(value => user.formIds.includes(value.formId)).map(val => val.formId);
+
+  const applications = await Application.find({userId: userId, formId: {$in : userFormIds}});
+  
+  // there's still a from to submit
+  if (applications.length !== userFormIds.length) {
+    return userFormIds.filter(formId => !applications.map(app => app.formId).includes(formId));
+  }
+
+  //
+  if (wantedStatusId === ApplicationStatus.InReview.id) {
+    const missingForms = applications.filter(app => (app.status.id === ApplicationStatus.InProgres.id && app.formId != formId));
+    if (missingForms.length > 0) {
+      return missingForms.map(form => form.formId);
+    }
+    await Application.updateMany({userId, formId: {$in: userFormIds}}, {status: ApplicationStatus.InReview});
+    return [];
+  }
+
+  if (wantedStatusId === ApplicationStatus.SubmittedToDoctor.id) {
+    const missingForms = applications.filter(app => (app.status.id === ApplicationStatus.InReview.id && app.formId != formId));
+    if (missingForms.length > 0) {
+      return missingForms.map(form => form.formId);
+    }
+    await Application.updateMany({userId, formId: {$in: userFormIds}}, {status: ApplicationStatus.SubmittedToDoctor});
+    return [];
+  }
+
+  return [];
+};
+
+export { router as applicationRouter };
+
+/Users/bubader/Documents/GitHub/vedi-dbq-automation/modules/api/src/routes/authRoute.ts
+import { Router, Request, Response } from "express";
+import User from "../db/models/User";
+import ResetToken from "../db/models/ResetPasswordToken";
+import jwt from "jsonwebtoken";
+import { JwtConfig } from "../config";
+import { v4 as uuidv4 } from "uuid";
+import { sendForgotPwdEmail } from "../utils/generateChangePwdFeRoute";
+import { validateForgotPassword } from "../middleware/validation/validateForgotPassword";
+import bcrypt from "bcrypt";
+const router = Router();
+
+router.post("/login", async (req: Request, res: Response) => {
+  const { email, password } = req.body;
+
+  if (!email || !password) {
+    return res.status(400).json({
+      message: "Email and password are required",
+    });
+  }
+
+  const user = await User.findOne({ email }, null, { lean: true });
+
+  // In case of a wrong Creds
+  const isPasswordCorrect = await bcrypt.compare(
+    password,
+    user?.password || ""
+  );
+
+  if (!user || !isPasswordCorrect)
+    return res.status(401).json({
+      success: false,
+      message: "Wrong credentials",
+      data: {},
+    });
+
+  const { password: pwd, ...returnUser } = user;
+  const accessToken = jwt.sign(returnUser, process.env.AUTH_SECRET!, {
+    expiresIn: JwtConfig.accessTokenExpiresIn * 1000,
+  });
+
+  return res.status(200).json({
+    success: true,
+    message: "Logged in successfully",
+    data: {
+      user: returnUser,
+      accessToken,
+    },
+  });
+});
+
+// Endpoint to generate unique URL for resetting password
+router.post(
+  "/forgot-password",
+  validateForgotPassword,
+  async (req: Request, res: Response) => {
+    const { email, redirection_url } = req.body;
+
+    try {
+      const user = await User.findOne({ email });
+
+      if (!user) {
+        return res.status(404).json({
+          success: false,
+          message: "User not found",
+          data: {},
+        });
+      }
+
+      const resetToken = uuidv4();
+      const expires = new Date(Date.now() + 3600000); // 1 hour
+
+      // Save reset token in ResetToken collection
+      await ResetToken.create({ userId: user._id, token: resetToken, expires });
+
+      // Generate the Redirection Route and send email
+      await sendForgotPwdEmail(
+        user.firstName,
+        user.email,
+        resetToken,
+        redirection_url
+      );
+
+      res.status(200).json({
+        success: true,
+        message: "Password reset link sent successfully",
+        data: {},
+      });
+    } catch (error) {
+      console.error("Error generating reset password link:", error);
+      res.status(500).json({
+        success: false,
+        message: "Internal server error",
+        data: {},
+      });
+    }
+  }
+);
+
+// Endpoint to update password using the unique URL
+router.post("/reset-password", async (req: Request, res: Response) => {
+  const { resetToken, newPassword } = req.body;
+
+  try {
+    // Find the reset token
+    const resetTokenDoc = await ResetToken.findOne({
+      token: resetToken,
+      expires: { $gt: Date.now() },
+    });
+
+    if (!resetTokenDoc) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid or expired reset token",
+        data: {},
+      });
+    }
+
+    // Find the user by userId in resetTokenDoc
+    const user = await User.findById(resetTokenDoc.userId);
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+        data: {},
+      });
+    }
+
+    // Hash the new password
+    const hashedPassword = newPassword; //await bcrypt.hash(newPassword, 10);
+
+    // Update user's password
+    user.password = hashedPassword;
+    await user.save();
+
+    // Delete the reset token from ResetToken collection
+    await ResetToken.deleteOne({ _id: resetTokenDoc._id });
+
+    res.status(200).json({
+      success: true,
+      message: "Password updated successfully",
+      data: {},
+    });
+  } catch (error) {
+    console.error("Error updating password:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      data: {},
+    });
+  }
+});
+
+export { router as authRouter };
+
+/Users/bubader/Documents/GitHub/vedi-dbq-automation/modules/api/src/routes/intakeRoute.ts
+import { Router, Request, Response } from "express";
+import axios from "axios";
+import { validateIntakeSubmit } from "../middleware/validation/validateIntakeSubmit";
+import { validationResult } from "express-validator";
+import {
+  UserIntakeResponse,
+  UserIntakeResponseType,
+} from "../db/models/UserIntakeResponse";
+import DBQgenResponse from "../db/models/DBQgenResponse";
+import mongoose from "mongoose";
+import Application from "../db/models/Application";
+import { ApplicationStatus } from "../types";
+import { authVeteran } from '../middleware/userRole.middleware';
+import authenticate from '../middleware/auth.middleware';
+import { getMissingFormsAndUpdateDb } from './applicationRoute';
+
+const router = Router();
+
+router.post(
+  "/submit",
+  authenticate,
+  authVeteran,
+  validateIntakeSubmit,
+  async (req: Request, res: Response) => {
+    try {
+      const { formId, userId, fields, isDraft } = req.body;
+
+      const application = await Application.findOne({
+        formId,
+        userId
+      })
+
+      if (application && application.status.id !== ApplicationStatus.InProgres.id && application.status.id !== ApplicationStatus.ApprovedByDoctor.id) {
+        return res.status(403).json({
+          success: false,
+          message: "This form has already been submitted"
+        });
+      }
+
+      let userIntakeResponse: UserIntakeResponseType;
+      if (application) {
+        userIntakeResponse = await UserIntakeResponse.findOneAndUpdate(
+          {_id: application.transactionId},
+          {
+            formId,
+            userId,
+            fields,
+          },
+          { upsert: true, new: true }
+        );
+      } else {
+        userIntakeResponse = await UserIntakeResponse.create(
+          {
+            formId,
+            userId,
+            fields,
+          }
+        );
+      }
+      // Persist data
+      
+
+      const {application: application2, missingForms}= await createOrUpdateApplication(
+        formId,
+        userId,
+        userIntakeResponse._id,
+        isDraft 
+      );
+
+      if (!isDraft) {
+        const dbqResponse = await generateDbqResponse(
+          formId,
+          userId,
+          userIntakeResponse,
+          fields
+        );
+        let data = {};
+        if (missingForms.length > 0) {
+          data = {
+            submitted: false,
+            formIds: missingForms,
+            application: application2
+          }
+        } else {
+          data = {
+            submitted: true,
+            application: application2
+          }
+        }
+        return res.status(200).json({
+          success: true,
+          message: "DBQ Submitted",
+          data
+        });
+      }
+
+      return res.status(200).send({
+        success: true,
+        message: "Intake form saved as draft",
+        data: application,
+      });
+    } catch (error: any) {
+      console.error("Error in intakeRoute:", error);
+      res.status(500).json({
+        message: "Something went wrong: intakeRoute:",
+        error: error.message,
+      });
+    }
+  }
+);
+
+router.delete(
+  "/:intakeId",
+  authenticate,
+  authVeteran,
+  async (req: any, res: Response) => {
+  try {
+    const { intakeId } = req.params;
+
+    const userIntakeResponse = await UserIntakeResponse.findById(
+      new mongoose.Types.ObjectId(intakeId)
+    );
+
+    if (userIntakeResponse == null) {
+      return res.status(404).json({
+        success: false,
+        message: "Intake form not found.",
+      });
+    }
+
+    // TODO: uncomment once the login auth is integrated from the FE
+    // const { userId } = userIntakeResponse;
+    // if (userId === req.user._id ) {
+    //   return res.status(403).json({
+    //     success: false,
+    //     message: "Unauthorized operation"
+    //   });
+    // }
+
+    const application = await Application.findOne({
+      transactionId: new mongoose.Types.ObjectId(userIntakeResponse._id),
+    });
+    if (application == null) {
+      return res.status(404).json({
+        success: false,
+        message: "Application not found.",
+      });
+    }
+
+    if (application.status.id !== ApplicationStatus.InProgres.id) {
+      return res.status(403).json({
+        success: false,
+        message: "The Application Status does not allow this operation",
+      });
+    }
+
+    await Promise.all([
+      Application.deleteOne({ _id: application._id }),
+      UserIntakeResponse.deleteOne({ _id: userIntakeResponse._id }),
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      message: "Intake form deleted",
+    });
+  } catch (error: any) {
+    console.error("Error in intakeRoute:", error);
+    res.status(500).json({
+      message: "Something went wrong: intakeRoute",
+      error: error.message,
+    });
+  }
+});
+
+//helper functions
+const generateDbqResponse = async (
+  formId: number,
+  userId: mongoose.Types.ObjectId,
+  userIntakeResponse: UserIntakeResponseType,
+  fields: any
+) => {
+  try {
+    const dbqResponse = await axios.post(
+      `${process.env.DBQ_GEN_API_URL}/process_intake`,
+      { formId, userId, fields }
+    );
+
+    if (dbqResponse.data) {
+      //save it
+      const dbq = new DBQgenResponse({
+        ...dbqResponse.data,
+        transactionId: userIntakeResponse._id,
+      });
+      await dbq.save();
+    }
+
+    return dbqResponse.data;
+  } catch (error: any) {
+    throw new Error(
+      "Error in intakeRoute, inside generateDbqResponse(): " + error.message
+    );
+  }
+};
+
+const createOrUpdateApplication = async (
+  formId: number,
+  userId: mongoose.Types.ObjectId,
+  transactionId: mongoose.Types.ObjectId,
+  isDraft: boolean
+) => {
+  try {
+    const filter = { transactionId };
+    const missingForms = await getMissingFormsAndUpdateDb(userId, formId, ApplicationStatus.InReview.id);
+    const update = {
+      formId,
+      userId,
+      status:
+        isDraft === true
+          ? ApplicationStatus.InProgres
+          : missingForms.length == 0 ? ApplicationStatus.InReview : ApplicationStatus.AwaitingSubmission,
+    };
+    const options = { upsert: true, new: true };
+
+    // Find existing document and update it, or create a new one if not found
+    const application = await Application.findOneAndUpdate(
+      filter,
+      update,
+      options
+    );
+    return {application, missingForms};
+  } catch (error: any) {
+    throw new Error(
+      "Error in intakeRoute, inside createOrUpdateApplication(): " +
+        error.message
+    );
+  }
+};
+
+export { router as intakeRouter };
+
