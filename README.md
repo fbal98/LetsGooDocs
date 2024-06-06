@@ -36,6 +36,10 @@
 - **readme**: Generate README file for a project
 - **explain**: Explains the main purposes of a project to make onboarding easier
 - **functions**: Lists all functions or classes with their inputs and outputs
+- **testing-docs**: Generates documentation for testing procedures and test cases
+- **erd**: Creates an Entity-Relationship Diagram (ERD) for the database schema
+- **deployment-guide**: Generates a guide for deploying the project to various environments
+- **troubleshooting**: Provides common troubleshooting steps and solutions for known issues
 
 ## Installation
 To get started with LetsGooDocs, clone the repository and install the dependencies:
